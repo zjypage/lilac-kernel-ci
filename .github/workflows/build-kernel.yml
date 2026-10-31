@@ -22,6 +22,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libncurses-dev \
             device-tree-compiler zip unzip python2 python2-dev \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
             git ca-certificates curl
           ln -sf /usr/bin/python2 /usr/bin/python
           python --version
@@ -59,33 +60,26 @@ jobs:
           fi
           echo "DEFCONFIG=$(basename $CFG)" >> $GITHUB_ENV
 
-      - name: Fetch AOSP aarch64 toolchain
+      - name: Verify cross toolchain
         run: |
           set -e
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 tc
-          echo "--- tc/bin (gcc entries) ---"
-          ls -l tc/bin | grep -i gcc || true
-          GCCBIN=$(ls tc/bin/aarch64-linux-android-gcc* 2>/dev/null | head -n1)
-          if [ -z "$GCCBIN" ]; then echo "NO GCC BINARY FOUND"; exit 1; fi
-          echo "GCCBIN=$GCCBIN" >> $GITHUB_ENV
+          aarch64-linux-gnu-gcc --version | head -n1
+          echo "CROSS=aarch64-linux-gnu-" >> $GITHUB_ENV
 
       - name: Configure
         run: |
           set -e
           cd kernel
           export ARCH=arm64 SUBARCH=arm64
-          TC=$GITHUB_WORKSPACE/tc/bin
-          export CROSS_COMPILE=$TC/aarch64-linux-android-
-          $CROSS_COMPILE"gcc" --version | head -n1 || true
-          make CC=$CROSS_COMPILE"gcc" O=out $DEFCONFIG
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make O=out $DEFCONFIG
 
       - name: Build kernel
         run: |
           set -e -o pipefail
           cd kernel
           export ARCH=arm64 SUBARCH=arm64
-          TC=$GITHUB_WORKSPACE/tc/bin
-          export CROSS_COMPILE=$TC/aarch64-linux-android-
+          export CROSS_COMPILE=aarch64-linux-gnu-
           make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE -j$(nproc) 2>&1 | tee build.log
 
       - name: Collect results
