@@ -8,26 +8,28 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    container: ubuntu:20.04
+    timeout-minutes: 240
     steps:
       - name: Show environment
         run: |
-          uname -a
-          nproc
-          free -h
-          df -h /
+          uname -a; nproc; free -h; df -h /
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libncurses-dev \
-            device-tree-compiler zip unzip python3 git ca-certificates
+            device-tree-compiler zip unzip python2 python2-dev \
+            git ca-certificates curl
+          ln -sf /usr/bin/python2 /usr/bin/python
+          python --version
 
       - name: Clone kernel (justinlin099, fallback whatawurst)
         run: |
           set -e
-          if git clone --depth=1 -b lineage-16.0 https://github.com/justinlin099/android_kernel_sony_msm8998 kernel; then
+          if git clone --depth=1 -b lineage-16.0 https://github.com/justinlin099/android_kernel_sony_msm8998 kernel 2>/dev/null; then
             echo "TREE=justinlin099" >> $GITHUB_ENV
           else
             rm -rf kernel
@@ -39,15 +41,12 @@ jobs:
         run: |
           set -e
           cd kernel
-          echo "--- existing defconfigs ---"
-          ls arch/arm64/configs | grep -iE 'lilac|dcm' || true
           BASE=arch/arm64/configs/lineage-msm8998-yoshino-lilac_defconfig
           DCM=arch/arm64/configs/lineage-msm8998-yoshino-lilac_dcm_defconfig
           if ls arch/arm64/configs | grep -qi dcm; then
             CFG=$(ls arch/arm64/configs | grep -i dcm | head -n1)
             echo "Using upstream dcm defconfig: $CFG"
           else
-            echo "No upstream dcm defconfig; deriving from lilac defconfig"
             cp "$BASE" "$DCM"
             sed -i 's/^# CONFIG_NFC is not set/CONFIG_NFC=y/' "$DCM"
             sed -i 's/^# CONFIG_NFC_NCI is not set/CONFIG_NFC_NCI=y/' "$DCM"
@@ -55,8 +54,8 @@ jobs:
             sed -i 's/^# CONFIG_BD7602_POWER_IC is not set/CONFIG_BD7602_POWER_IC=y/' "$DCM"
             sed -i 's/^CONFIG_NFC_PN553_DEVICES=m/# CONFIG_NFC_PN553_DEVICES is not set/' "$DCM"
             CFG="$DCM"
-            echo "--- NFC related lines in derived config ---"
-            grep -iE 'nfc|cxd|bd7602' "$DCM" | head -n 20 || true
+            echo "--- NC related lines ---"
+            grep -iE 'nfc|cxd|bd7602' "$DCM" || true
           fi
           echo "DEFCONFIG=$(basename $CFG)" >> $GITHUB_ENV
 
@@ -64,22 +63,29 @@ jobs:
         run: |
           set -e
           git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 tc
-          tc/bin/aarch64-linux-android-gcc --version | head -n1
+          echo "--- tc/bin (gcc entries) ---"
+          ls -l tc/bin | grep -i gcc || true
+          GCCBIN=$(ls tc/bin/aarch64-linux-android-gcc* 2>/dev/null | head -n1)
+          if [ -z "$GCCBIN" ]; then echo "NO GCC BINARY FOUND"; exit 1; fi
+          echo "GCCBIN=$GCCBIN" >> $GITHUB_ENV
 
       - name: Configure
         run: |
           set -e
           cd kernel
           export ARCH=arm64 SUBARCH=arm64
-          export CROSS_COMPILE=$GITHUB_WORKSPACE/tc/bin/aarch64-linux-android-
-          make O=out $DEFCONFIG
+          TC=$GITHUB_WORKSPACE/tc/bin
+          export CROSS_COMPILE=$TC/aarch64-linux-android-
+          $CROSS_COMPILE"gcc" --version | head -n1 || true
+          make CC=$CROSS_COMPILE"gcc" O=out $DEFCONFIG
 
       - name: Build kernel
         run: |
-          set -e
+          set -e -o pipefail
           cd kernel
           export ARCH=arm64 SUBARCH=arm64
-          export CROSS_COMPILE=$GITHUB_WORKSPACE/tc/bin/aarch64-linux-android-
+          TC=$GITHUB_WORKSPACE/tc/bin
+          export CROSS_COMPILE=$TC/aarch64-linux-android-
           make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE -j$(nproc) 2>&1 | tee build.log
 
       - name: Collect results
@@ -87,6 +93,8 @@ jobs:
         run: |
           mkdir -p out
           cp kernel/out/arch/arm64/boot/Image.gz-dtb out/ 2>/dev/null || true
+          cp kernel/out/arch/arm64/boot/Image.gz out/ 2>/dev/null || true
+          cp kernel/out/arch/arm64/boot/Image out/ 2>/dev/null || true
           cp kernel/build.log out/ 2>/dev/null || true
           cp kernel/out/.config out/kernel.config 2>/dev/null || true
           ls -lh out || true
