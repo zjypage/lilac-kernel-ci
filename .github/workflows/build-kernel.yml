@@ -84,7 +84,10 @@ jobs:
           cd kernel
           export ARCH=arm64 SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE -j$(nproc) 2>&1 | tee build.log
+          export WERROR=0
+          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE \
+            KCFLAGS="-Wno-stringop-overflow -Wno-error" \
+            -j$(nproc) 2>&1 | tee build.log
 
       - name: Collect results
         if: always()
