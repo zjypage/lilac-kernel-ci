@@ -1,0 +1,100 @@
+name: build-lilac-dcm-kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - name: Show environment
+        run: |
+          uname -a
+          nproc
+          free -h
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libncurses-dev \
+            device-tree-compiler zip unzip python3 git ca-certificates
+
+      - name: Clone kernel (justinlin099, fallback whatawurst)
+        run: |
+          set -e
+          if git clone --depth=1 -b lineage-16.0 https://github.com/justinlin099/android_kernel_sony_msm8998 kernel; then
+            echo "TREE=justinlin099" >> $GITHUB_ENV
+          else
+            rm -rf kernel
+            git clone --depth=1 -b lineage-16.0 https://github.com/whatawurst/android_kernel_sony_msm8998 kernel
+            echo "TREE=whatawurst" >> $GITHUB_ENV
+          fi
+
+      - name: Prepare dcm defconfig
+        run: |
+          set -e
+          cd kernel
+          echo "--- existing defconfigs ---"
+          ls arch/arm64/configs | grep -iE 'lilac|dcm' || true
+          BASE=arch/arm64/configs/lineage-msm8998-yoshino-lilac_defconfig
+          DCM=arch/arm64/configs/lineage-msm8998-yoshino-lilac_dcm_defconfig
+          if ls arch/arm64/configs | grep -qi dcm; then
+            CFG=$(ls arch/arm64/configs | grep -i dcm | head -n1)
+            echo "Using upstream dcm defconfig: $CFG"
+          else
+            echo "No upstream dcm defconfig; deriving from lilac defconfig"
+            cp "$BASE" "$DCM"
+            sed -i 's/^# CONFIG_NFC is not set/CONFIG_NFC=y/' "$DCM"
+            sed -i 's/^# CONFIG_NFC_NCI is not set/CONFIG_NFC_NCI=y/' "$DCM"
+            sed -i 's/^# CONFIG_CXD224X_NFC is not set/CONFIG_CXD224X_NFC=y/' "$DCM"
+            sed -i 's/^# CONFIG_BD7602_POWER_IC is not set/CONFIG_BD7602_POWER_IC=y/' "$DCM"
+            sed -i 's/^CONFIG_NFC_PN553_DEVICES=m/# CONFIG_NFC_PN553_DEVICES is not set/' "$DCM"
+            CFG="$DCM"
+            echo "--- NFC related lines in derived config ---"
+            grep -iE 'nfc|cxd|bd7602' "$DCM" | head -n 20 || true
+          fi
+          echo "DEFCONFIG=$(basename $CFG)" >> $GITHUB_ENV
+
+      - name: Fetch AOSP aarch64 toolchain
+        run: |
+          set -e
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 tc
+          tc/bin/aarch64-linux-android-gcc --version | head -n1
+
+      - name: Configure
+        run: |
+          set -e
+          cd kernel
+          export ARCH=arm64 SUBARCH=arm64
+          export CROSS_COMPILE=$GITHUB_WORKSPACE/tc/bin/aarch64-linux-android-
+          make O=out $DEFCONFIG
+
+      - name: Build kernel
+        run: |
+          set -e
+          cd kernel
+          export ARCH=arm64 SUBARCH=arm64
+          export CROSS_COMPILE=$GITHUB_WORKSPACE/tc/bin/aarch64-linux-android-
+          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE -j$(nproc) 2>&1 | tee build.log
+
+      - name: Collect results
+        if: always()
+        run: |
+          mkdir -p out
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb out/ 2>/dev/null || true
+          cp kernel/build.log out/ 2>/dev/null || true
+          cp kernel/out/.config out/kernel.config 2>/dev/null || true
+          ls -lh out || true
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-output
+          path: out/
+          retention-days: 7
