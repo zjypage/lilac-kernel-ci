@@ -75,7 +75,7 @@ jobs:
           cd kernel
           export ARCH=arm64 SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          make O=out $DEFCONFIG
+          make O=out CC=aarch64-linux-gnu-gcc $DEFCONFIG
 
       - name: Build kernel
         shell: bash
@@ -85,9 +85,8 @@ jobs:
           export ARCH=arm64 SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export WERROR=0
-          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE \
-            KCFLAGS="-Wno-stringop-overflow -Wno-error" \
-            -j$(nproc) 2>&1 | tee build.log
+          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE CC=aarch64-linux-gnu-gcc \
+            KCFLAGS="-Wno-error" -j$(nproc) 2>&1 | tee build.log
 
       - name: Collect results
         if: always()
