@@ -28,6 +28,7 @@ jobs:
           python --version
 
       - name: Clone kernel (justinlin099, fallback whatawurst)
+        shell: bash
         run: |
           set -e
           if git clone --depth=1 -b lineage-16.0 https://github.com/justinlin099/android_kernel_sony_msm8998 kernel 2>/dev/null; then
@@ -39,6 +40,7 @@ jobs:
           fi
 
       - name: Prepare dcm defconfig
+        shell: bash
         run: |
           set -e
           cd kernel
@@ -67,6 +69,7 @@ jobs:
           echo "CROSS=aarch64-linux-gnu-" >> $GITHUB_ENV
 
       - name: Configure
+        shell: bash
         run: |
           set -e
           cd kernel
@@ -75,6 +78,7 @@ jobs:
           make O=out $DEFCONFIG
 
       - name: Build kernel
+        shell: bash
         run: |
           set -e -o pipefail
           cd kernel
@@ -84,6 +88,7 @@ jobs:
 
       - name: Collect results
         if: always()
+        shell: bash
         run: |
           mkdir -p out
           cp kernel/out/arch/arm64/boot/Image.gz-dtb out/ 2>/dev/null || true
